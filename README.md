@@ -2,22 +2,47 @@
 
 The minimal full-stack ChatGPT clone
 
-## Quick Setup
+## Installation & Setup
 
-### Poetry Environment + Jupyter Setup
+### Prerequisites
+- Python 3.10-3.13
+- CUDA 12.8 compatible GPU (optional, for GPU acceleration)
+
+### Quick Setup with uv (Recommended)
 
 ```bash
-# Install dependencies using Poetry
-poetry install
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install the Poetry environment as a Jupyter kernel
-poetry run python -m ipykernel install --user --name=minichat --display-name="minichat"
+# Create and activate a virtual environment
+uv venv
+source .venv/bin/activate  # On macOS/Linux
+
+# Install the package and dependencies
+uv pip install -e .
+
+# Install development dependencies (optional)
+uv pip install -e ".[dev]"
+
+# Install the environment as a Jupyter kernel
+python -m ipykernel install --user --name=minichat --display-name="minichat"
 ```
 
-### Alternative one-liner setup:
+### Alternative setup with pip
+
 ```bash
-# Quick setup in one command
-poetry install && poetry run python -m ipykernel install --user --name=minichat --display-name="minichat"
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On macOS/Linux
+
+# Install the package and dependencies
+pip install -e .
+
+# Install development dependencies (optional)
+pip install -e ".[dev]"
+
+# Install the environment as a Jupyter kernel
+python -m ipykernel install --user --name=minichat --display-name="minichat"
 ```
 
 ### Using with VS Code Notebooks
@@ -25,13 +50,13 @@ poetry install && poetry run python -m ipykernel install --user --name=minichat 
 1. Open your notebook in VS Code
 2. Click on the kernel selector (top-right of notebook)
 3. Choose "minichat" from the kernel list
-4. The notebook will now use the Poetry environment with all dependencies
+4. The notebook will now use the environment with all dependencies
 
 ### Using with Jupyter Lab
 
 ```bash
-# Start Jupyter Lab with Poetry environment
-poetry run jupyter lab
+# Start Jupyter Lab
+jupyter lab
 ```
 
 ### Verification
@@ -39,19 +64,31 @@ poetry run jupyter lab
 Verify the setup is working correctly:
 
 ```bash
-poetry run python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+# Check PyTorch installation and CUDA availability
+python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Check other key dependencies
+python -c "import fastapi, tiktoken, wandb; print('All dependencies loaded successfully')"
 ```
 
-### Optional: Activate Poetry Shell
+### Running Tests
 
 ```bash
-# Activate the Poetry shell for direct command line usage
-poetry shell
+# Run the test suite
+pytest
+
+# Run tests excluding slow ones
+pytest -m "not slow"
 ```
 
 ## Development
 
-Once setup is complete, you can run the notebook `minichat/gpt.ipynb` with all dependencies available in the Poetry environment.
+Once setup is complete, you can run the notebook `minichat/gpt.ipynb` with all dependencies available in the virtual environment.
+
+### Notes
+- This project includes Rust components (rustbpe) that will be compiled during installation
+- PyTorch is configured to use CUDA 12.8 by default for GPU acceleration
+- The project supports Python 3.10-3.13
 
 
 # Learning-through-building plan for scaling a transformer
