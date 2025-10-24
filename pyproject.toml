@@ -17,11 +17,12 @@ dependencies = [
     "uvicorn>=0.36.0",
     "wandb>=0.21.3",
     "ipykernel (>=7.0.1,<8.0.0)",
+    "matplotlib>=3.10.7",
 ]
 
 [build-system]
-requires = ["maturin>=1.7,<2.0"]
-build-backend = "maturin"
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
 
 # target torch to cuda 12.8
 [tool.uv.sources]
@@ -34,15 +35,8 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-[tool.maturin]
-module-name = "rustbpe"
-bindings = "pyo3"
-python-source = "."
-manifest-path = "rustbpe/Cargo.toml"
-
 [dependency-groups]
 dev = [
-    "maturin>=1.9.4",
     "pytest>=8.0.0",
 ]
 
