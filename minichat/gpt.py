@@ -67,11 +67,11 @@ class GPT(nn.Module):
         super().__init__()
         self.config = config
         self.transformer = nn.ModuleDict({
-            "wte": nn.Embedding(config.vocab_size, config.n_embd),
-            "wpe": nn.Embedding(config.sequence_len, config.n_embd),  # Added positional embeddings
+            "wte": nn.Embedding(config.vocab_size, config.emb_dim),
+            "wpe": nn.Embedding(config.sequence_len, config.emb_dim),  # Added positional embeddings
             "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)])
         })
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False)
         
         # Initialize weights
         self.init_weights()
@@ -100,9 +100,9 @@ class GPT(nn.Module):
         
         # Token and position embeddings
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)  # shape (T)
-        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (B, T, n_embd)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (T, n_embd)
-        x = tok_emb + pos_emb  # (B, T, n_embd)
+        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (B, T, emb_dim)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (T, emb_dim)
+        x = tok_emb + pos_emb  # (B, T, emb_dim)
         
         # Apply initial norm
         x = norm(x)
