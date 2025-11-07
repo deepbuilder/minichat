@@ -29,10 +29,10 @@ def data_loader(B, T, split, tokenizer_batch_size=128, tokenizer_threds=4):
             token_lists = tokenizer.encode(doc_batch, prepand=bos_token_id, num_threads=tokenizer_threds)
         batc_idx += 1
     
-    tokens = [token_buffer.popleft() for _ in range(needded_tokens)]
-    sctrach = torch.tensor(tokens, dtype=torch.int32, pin_memory=(device == cuda))
-    inputs_cpu = sctrach[:-1].to(dtype=torch.int32)
-    targets_cpu = sctrach[1:]
+    tokens = [token_buffer.popleft() for _ in range(needed_tokens)]
+    scrach = torch.tensor(tokens, dtype=torch.int32, pin_memory=(device == cuda))
+    inputs_cpu = scrach[:-1].to(dtype=torch.int32)
+    targets_cpu = scrach[1:]
 
     inputs = inputs_cpu.view(B, T).to(device=device, dtype=torch.int32, non_blocking=True)
     targets = targets_cpu.view(B, T).to(device=device, dtype=torch.int32, non_blocking=True)
