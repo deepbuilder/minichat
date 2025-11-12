@@ -1,4 +1,5 @@
 import os
+import torch
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers import Regex, pre_tokenizers, decoders
@@ -33,6 +34,11 @@ class HFTokenizer:
     def from_pretrained(cls, path):
         tokenizer = Tokenizer.from_pretrained(path)
         return cls(tokenizer)
+    
+    @classmethod
+    def from_file(cls, path):
+        tokenizer = Tokenizer.from_file(path)
+        return cls(tokenizer)
 
     @classmethod
     def train_from_iterator(cls, text_iterator, vocab_size):
@@ -58,9 +64,12 @@ class HFTokenizer:
 
     def get_vocab_size(self):
         return self.tokenizer.get_vocab_size()
+    
+    def get_special_tokens(self):
+        return SPECIAL_TOKENS
 
     def get_bos_token_id(self):
-        return self.tokenizer.encode_special("<|bos|>")
+        return self.tokenizer.token_to_id("<|bos|>")
 
     def _encode_one(self, text, prepand=None, append=None):
         assert isinstance(text, str)
@@ -97,9 +106,16 @@ class HFTokenizer:
 def get_tokenizer():
     base_dir = get_base_dir()
     tokenizer_dir = os.path.join(base_dir, 'tokenizer')
-    tokenizer = HFTokenizer.from_pretrained(tokenizer_dir)
+    tokenize_path = os.path.join(tokenizer_dir, 'tokenizer.json')
+    tokenizer = HFTokenizer.from_file(tokenize_path)
     return tokenizer
 
 
-
+def get_token_bytes():
+    base_dir = get_base_dir()
+    tokenizer_dir = os.path.join(base_dir, 'tokenizer')
+    token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
+    with open(token_bytes_path, "rb") as f:
+        token_bytes = torch.load(f)
+    return token_bytes
 

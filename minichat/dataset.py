@@ -9,7 +9,7 @@ import argparse
 from multiprocessing import Pool
 import pyarrow.parquet as pq
 
-DATA_DIR = 'minichat/data'
+DATA_DIR = '/home/shadeform/minichat/minichat/data'
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def download_file(index):
@@ -62,6 +62,9 @@ def iter_batched(split, start=0, step=1):
     paths = all_files[:-1] if split == 'train' else all_files[-1:]
     for file_path in paths:
         pf = pq.ParquetFile(file_path)
+        for i in range(start, pf.num_row_groups, step):
+            table = pf.read_row_group(i)
+            yield table.column('text').to_pylist()
 
 
 if __name__ == '__main__':

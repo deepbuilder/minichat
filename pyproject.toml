@@ -40,6 +40,10 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["minichat*"]
+exclude = ["rustbpe*"]
+
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

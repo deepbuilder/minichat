@@ -15,25 +15,31 @@ def evaluate_bpb(model, batches, steps, token_bytes):
     4. bpb = total_nats / log(2) * total_bytes
 
     '''
-    total_nats = torch.zeros_((), dtype=torch.float64, device=model.device())
-    total_bytes = torch.zeros_((), dtype=torch.int32, device=model.device())
+    total_nats = torch.tensor(0.0, dtype=torch.float32, device=model.device())
+    total_bytes = torch.tensor(0, dtype=torch.int64, device=model.device())
 
     batch_iter = iter(batches)
+    token_bytes = token_bytes.to(device=model.device())
 
     for _ in range(steps):
-        batch, y = next(batch_iter)
-        loss = model(batch, y, loss_reduction=None)
+        x, y = next(batch_iter)
+        loss = model(x, y, loss_reduction='none')
         loss = loss.view(-1) # flatten
         y = y.view(-1)
-        if (y<0).any():
+        if (y.int()<0).any():
             valid = (y>=0)
             y_safe = torch.where(valid, y, torch.zeros_like(y))
-            num_bytes = torch.where(valid, token_bytes[y_safe], torch.zeros_like(y))
+            num_bytes = torch.where(valid, token_bytes[y_safe], torch.zeros_like(y, dtype=token_bytes.dtype))
             total_nats += (loss * (num_bytes > 0)).sum()
             total_bytes += num_bytes.sum()
         else:
             num_bytes = token_bytes[y]
-            loss = (loss *(num_bytes>0)).sum()
+            total_nats += (loss *(num_bytes>0)).sum()
+            total_bytes += num_bytes.sum()
         
-        bpb = total_nats/(math.log(2) * total_bytes)
-        return bpb
+    total_nats = total_nats.item()
+    total_bytes = total_bytes.item()
+    if total_bytes == 0:
+        return float('inf')
+    bpb = total_nats / (math.log(2) * total_bytes)
+    return bpb

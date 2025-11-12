@@ -14,7 +14,7 @@ def get_ddp_info():
         return False, 0, 0, 1
 
 def get_base_dir():
-    home_dir = os.path.expanduser("~")
-    base_dir = os.path.join(home_dir, '.minichat')
+    home_dir = os.path.expanduser("/home/shadeform/minichat")
+    base_dir = os.path.join(home_dir, 'minichat')
     os.makedirs(base_dir, exist_ok=True)
     return base_dir

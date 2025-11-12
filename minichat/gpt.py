@@ -13,18 +13,19 @@ class GPTConfig:
     n_heads: int = 8
 
 def norm(x):
-    return F.rms_norm(x)
+    return F.rms_norm(x, (x.size(-1),))
 
 # (softmax(qT * k)/sqrt(d_k))*v
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_idx):
         super().__init__()
+        self.layer_idx = layer_idx
         self.n_heads = config.n_heads
         self.head_dim = config.emb_dim // config.n_heads
-        self.c_q = nn.Linear(config.emb_dim, self.head_dim, bias=False)
-        self.c_k = nn.Linear(config.emb_dim, self.head_dim, bias=False)
-        self.c_v = nn.Linear(config.emb_dim, self.head_dim, bias=False)
+        self.c_q = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
+        self.c_k = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
+        self.c_v = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
         self.c_proj = nn.Linear(config.emb_dim, config.emb_dim, bias=False)
     
     def forward(self, x):
@@ -43,18 +44,19 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc = nn.Linear(config.emb_dim, 4*config.emb_dim)
-        self.proj = nn.Linear(4*config.emb_dim, config.emb_dim)
+        self.c_proj = nn.Linear(4*config.emb_dim, config.emb_dim)
     
     def forward(self, x):
         x = self.c_fc(x)
         x = F.relu(x).square()
-        x = self.proj(x)
+        x = self.c_proj(x)
         return x
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_idx):
         super().__init__()
-        self.sa = CausalSelfAttention(config)
+        self.layer_idx = layer_idx
+        self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
     
     def forward(self, x):
@@ -69,7 +71,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict({
             "wte": nn.Embedding(config.vocab_size, config.emb_dim),
             "wpe": nn.Embedding(config.sequence_len, config.emb_dim),  # Added positional embeddings
-            "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)])
+            "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layers)])
         })
         self.lm_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False)
         
@@ -88,8 +90,8 @@ class GPT(nn.Module):
         self.apply(self._init_weights)
         # Apply special scaling to residual projections (GPT-2 style)
         for block in self.transformer.h:
-            torch.nn.init.normal_(block.mlp.c_proj.weight, mean=0.0, std=0.02/torch.sqrt(torch.tensor(2 * self.config.n_layer)))
-            torch.nn.init.normal_(block.attn.c_proj.weight, mean=0.0, std=0.02/torch.sqrt(torch.tensor(2 * self.config.n_layer)))
+            torch.nn.init.zeros_(block.attn.c_proj.weight)
+            torch.nn.init.zeros_(block.mlp.c_proj.weight)
     
     def device(self):
         return next(self.parameters()).device
@@ -141,4 +143,12 @@ class GPT(nn.Module):
                 ids = torch.cat((ids, next_ids), dim=1)
                 token = next_ids.item()
                 yield token
+    
+    def estimate_flops_per_token(self):
+        # Rough estimate of FLOPs per token during training
+        nparams = sum(p.numel() for p in self.parameters())
+        nparams_embedding = self.transformer.wte.weight.numel() + self.transformer.wpe.weight.numel()
+        l, h, q, t = self.config.n_layers, self.config.n_heads, self.config.emb_dim // self.config.n_heads, self.config.sequence_len
+        num_flops_per_token = 6 * (nparams - nparams_embedding) + 12 * l * h * q * t
+        return num_flops_per_token
                 
