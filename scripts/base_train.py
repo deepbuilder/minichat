@@ -1,16 +1,18 @@
 import torch
 
 from minichat.gpt import GPTConfig, GPT
+from minichat.common import get_base_dir
+from minichat.dataloader import data_loader
 
-sequence_len =  512
-n_layers = 12
-vocab_size = 64
-emb_dim = 128
+sequence_len =  128
+n_layers = 4
+vocab_size = 65_536
+emb_dim = 64
 n_heads = 8
 device = "cuda"
 
 num_iterations = 10
-total_batch_size = 64
+total_batch_size = 4
 
 model_config_kwargs = {
     "sequence_len": sequence_len,
@@ -30,29 +32,30 @@ model.init_weights()
 model = torch.compile(model, dynamic=False)
 
 num_params = sum(p.numel() for p in model.parameters())
-num_flops = model.estimate_flops_per_token()
+num_flops_per_token = model.estimate_flops_per_token()
 print(f"Model parameters: {num_params/1e6:.2f}M")
-print(f"Model FLOPs per token: {num_flops/1e9:.2f}B")
+print(f"Model FLOPs per token: {num_flops_per_token/1e9:.2f}B")
 
 
 total_tokens = total_batch_size * num_iterations
 print(f"Training for {total_tokens/1e9:.2f}B tokens")
 print(f"Tokens : Params ratio : {total_tokens/num_params:.2f}")
-print(f"Total training FLOPs : {total_tokens * num_flops / 1e18:.2f} EFLOPs")
+print(f"Total training FLOPs : {total_tokens * num_flops_per_token / 1e18:.2f} EFLOPs")
 
 # ---------
 # Initialize the Optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
 
-# Initialize a dummy input batch
-input_batch = torch.randint(0, vocab_size, (total_batch_size, sequence_len), device=device)
-target_batch = torch.randint(0, vocab_size, (total_batch_size, sequence_len), device=device)
+# Initialize input batch
+base_dir = get_base_dir()
+train_loader = data_loader(total_batch_size, sequence_len, 'train')
 
 # Training loop
 for step in range(num_iterations):
     optimizer.zero_grad()
-    loss = model(input_batch, targets=target_batch)
+    x, y = next(train_loader)
+    loss = model(x, targets=y)
     loss.backward()
     optimizer.step()
     if (step + 1) % 1 == 0:
