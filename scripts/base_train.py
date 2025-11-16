@@ -3,6 +3,8 @@ import torch
 from minichat.gpt import GPTConfig, GPT
 from minichat.common import get_base_dir
 from minichat.dataloader import data_loader
+from minichat.loss_eval import evaluate_bpb
+from minichat.tokenizer import get_token_bytes
 
 sequence_len =  128
 n_layers = 4
@@ -50,9 +52,18 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 # Initialize input batch
 base_dir = get_base_dir()
 train_loader = data_loader(total_batch_size, sequence_len, 'train')
+val_loader = data_loader(total_batch_size, sequence_len, 'val')
+token_bytes = get_token_bytes()
+
 
 # Training loop
 for step in range(num_iterations):
+    if step % 2 == 0:
+        model.eval()
+        val_bpb = evaluate_bpb(model, val_loader, steps=1, token_bytes=token_bytes)
+        print(f"Step {step}/{num_iterations}, Validation BPB: {val_bpb:.4f}")
+
+        model.train()
     optimizer.zero_grad()
     x, y = next(train_loader)
     loss = model(x, targets=y)
