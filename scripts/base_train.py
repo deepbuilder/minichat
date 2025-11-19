@@ -15,6 +15,7 @@ device = "cuda"
 
 num_iterations = 10
 total_batch_size = 4
+core_metric_every = 5
 
 model_config_kwargs = {
     "sequence_len": sequence_len,
@@ -58,11 +59,16 @@ token_bytes = get_token_bytes()
 
 # Training loop
 for step in range(num_iterations):
-    if step % 2 == 0:
+    last_step = (step == num_iterations - 1)
+    if step % 2 == 0 or last_step:
         model.eval()
         val_bpb = evaluate_bpb(model, val_loader, steps=1, token_bytes=token_bytes)
         print(f"Step {step}/{num_iterations}, Validation BPB: {val_bpb:.4f}")
         model.train()
+
+    if core_metric_every > 0 and (step % core_metric_every == 0 or last_step):
+        train_bpb = evaluate_bpb(model, train_loader, steps=1, token_bytes=token_bytes)
+        print(f"Step {step}/{num_iterations}, Training BPB: {train_bpb:.4f}")
     optimizer.zero_grad()
     x, y = next(train_loader)
     loss = model(x, targets=y)
