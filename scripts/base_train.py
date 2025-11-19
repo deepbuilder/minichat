@@ -62,7 +62,6 @@ for step in range(num_iterations):
         model.eval()
         val_bpb = evaluate_bpb(model, val_loader, steps=1, token_bytes=token_bytes)
         print(f"Step {step}/{num_iterations}, Validation BPB: {val_bpb:.4f}")
-
         model.train()
     optimizer.zero_grad()
     x, y = next(train_loader)
