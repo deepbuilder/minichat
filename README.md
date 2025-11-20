@@ -11,6 +11,11 @@ The minimal full-stack ChatGPT clone
 ### Quick Setup with uv (Recommended)
 
 ```bash
+
+# Cloning the repository
+git clone https://github.com/deepbuilder/minichat.git
+cd minichat
+
 # Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -57,6 +62,19 @@ python -m ipykernel install --user --name=minichat --display-name="minichat"
 ```bash
 # Start Jupyter Lab
 jupyter lab
+```
+
+## Testing the run
+```bash
+# Activate the virtual environment if not already active
+source .venv/bin/activate  # On macOS/Linux
+
+# Download the dataset
+python minichat/dataset.py -w 10
+
+# Train the tokenizer
+python scripts/tok_train.py
+
 ```
 
 ### Verification
