@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class GPTConfig:
     sequence_len: int = 512
     n_layers: int = 12
-    vocab_size: int = 64
+    vocab_size: int = 65_536
     emb_dim: int = 128
     n_heads: int = 8
 
@@ -119,7 +119,7 @@ class GPT(nn.Module):
         if targets is not None:
             # Training mode: compute loss
             logits = self.lm_head(x)
-            logits = logits.float()
+            logits = logits.float()               
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction=loss_reduction)
             return loss
         else:

@@ -9,7 +9,7 @@ import csv
 import json
 import torch
 from minichat.core_eval import evaluate_task
-from minichat.common import get_base_dir, download_file_with_lock, postprocess_fn
+from minichat.common import get_base_dir, download_file_with_lock, place_eval_bundle
 
 
 EVAL_BUNDLE_URL = "https://karpathy-public.s3.us-west-2.amazonaws.com/eval_bundle.zip"
@@ -30,7 +30,7 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
     base_dir = get_base_dir()
     eval_bundle_dir = os.path.join(base_dir, "eval_bundle")
     if not os.path.exists(eval_bundle_dir):
-        download_file_with_lock(EVAL_BUNDLE_URL, place_eval_bundle, postprocess_fn)
+        download_file_with_lock(EVAL_BUNDLE_URL, "eval_bundle.zip", place_eval_bundle)
 
     config_path = os.path.join(eval_bundle_dir, "core.yaml")
     data_base_path = os.path.join(eval_bundle_dir, "eval_data")
@@ -49,13 +49,12 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
             random_baseline = row['Random baseline']
             random_baselines[task_name] = float(random_baseline)
 
-
-    data_path = os.path.join(data_base_path, task_meta['dataset_uri'])
-
     results = {}
     centered_results = {}
 
     for task in tasks:
+        if task['icl_task_type'] != 'language_modeling':
+            continue
         start_time = time.time()
         label = task['label']
         task_meta = {
@@ -64,6 +63,7 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
             'num_fewshot': task['num_fewshot'][0],
             'continuation_delimiter': task.get('continuation_delimiter', ' ')
         }
+        data_path = os.path.join(data_base_path, task_meta['dataset_uri'])
         with open(data_path, 'r', encoding='utf-8') as f:
             data = [json.loads(line.strip()) for line in f.readlines()]
         

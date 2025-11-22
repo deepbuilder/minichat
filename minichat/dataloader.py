@@ -33,12 +33,12 @@ def data_loader(B, T, split, tokenizer_batch_size=16, tokenizer_threds=4, device
         batch_idx += 1
     
         tokens = [token_buffer.popleft() for _ in range(needed_tokens)]
-        scrach = torch.tensor(tokens, dtype=torch.int32, pin_memory=(device == 'cuda'))
-        inputs_cpu = scrach[:-1].to(dtype=torch.int32)
+        scrach = torch.tensor(tokens, dtype=torch.long, pin_memory=(device == 'cuda'))
+        inputs_cpu = scrach[:-1].to(dtype=torch.long)
         targets_cpu = scrach[1:]
 
-        inputs = inputs_cpu.view(B, T).to(device=device, dtype=torch.int32, non_blocking=True)
-        targets = targets_cpu.view(B, T).to(device=device, dtype=torch.int32, non_blocking=True)
+        inputs = inputs_cpu.view(B, T).to(device=device, dtype=torch.long, non_blocking=True)
+        targets = targets_cpu.view(B, T).to(device=device, dtype=torch.long, non_blocking=True)
 
         yield inputs, targets
 

@@ -65,8 +65,8 @@ def evaluate_example(idx, data, task_meta, model, tokenizer, device):
         prompts = render_prompt(item, continuation_delimiter, fewshot_examples)
         tokens, start_idxs, end_idxs = batch_sequences(prompts, tokenizer, device)
     
-    if hasattr(model, 'max_seq_len') and model.max_seq_len is not None:
-        max_tokens = model.max_seq_len
+    if hasattr(model, 'config') and hasattr(model.config, 'sequence_len'):
+        max_tokens = model.config.sequence_len
         new_tokens, new_start_idxs, new_end_idxs = [], [], []
         for t, s, e in zip(tokens, start_idxs, end_idxs):
             if len(t) > max_tokens:
