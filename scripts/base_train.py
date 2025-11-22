@@ -12,9 +12,12 @@ vocab_size = 65_536
 emb_dim = 64
 n_heads = 8
 device = "cuda"
+max_seq_len = 
 
 num_iterations = 10
-total_batch_size = 4
+
+device_batch_size = 4
+total_batch_size = 524288
 core_metric_every = 5
 
 model_config_kwargs = {
@@ -40,7 +43,9 @@ print(f"Model parameters: {num_params/1e6:.2f}M")
 print(f"Model FLOPs per token: {num_flops_per_token/1e9:.2f}B")
 
 
-total_tokens = total_batch_size * num_iterations
+tokens_per_fwdbwd = device_batch_size * max_seq_len
+asser
+
 print(f"Training for {total_tokens/1e9:.2f}B tokens")
 print(f"Tokens : Params ratio : {total_tokens/num_params:.2f}")
 print(f"Total training FLOPs : {total_tokens * num_flops_per_token / 1e18:.2f} EFLOPs")
@@ -49,11 +54,10 @@ print(f"Total training FLOPs : {total_tokens * num_flops_per_token / 1e18:.2f} E
 # Initialize the Optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 
-
 # Initialize input batch
 base_dir = get_base_dir()
-train_loader = data_loader(total_batch_size, sequence_len, 'train')
-val_loader = data_loader(total_batch_size, sequence_len, 'val')
+train_loader = data_loader(device_batch_size, sequence_len, 'train')
+val_loader = data_loader(device_batch_size, sequence_len, 'val')
 token_bytes = get_token_bytes()
 
 
