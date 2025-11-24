@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
+from functools import partial
 
 
 @dataclass
@@ -95,6 +96,26 @@ class GPT(nn.Module):
     
     def device(self):
         return next(self.parameters()).device
+    
+    def setup_optimizers(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0):
+        model_dim = self.config.emb_dim
+        matrix_params = list(self.transformer.h.parameters())
+        embedding_params = list(self.transformer.wte.parameters()) + list(self.transformer.wpe.parameters())
+        unembedding_params = list(self.lm_head.parameters())
+        assert len(list(self.parameters())) == len(matrix_params) + len(embedding_params) + len(unembedding_params), "Parameter count mismatch in optimizer setup"
+        dmodel_lr_scale = model_dim/768 ** -0.5
+        adam_groups = [
+            dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
+            dict(params=unembedding_params, lr=unembedding_lr * dmodel_lr_scale),
+            dict(params=matrix_params, lr=matrix_lr * dmodel_lr_scale)
+        ]
+        adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
+        AdamWFactory = partial(torch.optim.AdamW, fused=True)
+        optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
+        for group in optimizer.param_groups:
+            group['initial_lr'] = group['lr']
+        return optimizer
+
     
     def forward(self, idx, targets=None, loss_reduction='mean'):
         B, T = idx.size()

@@ -50,8 +50,9 @@ python scripts/tok_train.py
 ## Things to add
 - Cleanup Eval script - Done
 - Add Wandb logging
-- Add Gradient accumulation
-- Add LR scheduler
+- Add Gradient accumulation - Done
+- Add optimizer - Done 
+- Add LR scheduler - Done
 - Add Mixed precision training
 - Add Inference engine
 - Use Muon optimizer
