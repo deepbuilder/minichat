@@ -1,5 +1,6 @@
 import torch
 import time
+import os
 
 from minichat.gpt import GPTConfig, GPT
 from minichat.common import get_base_dir
@@ -7,9 +8,10 @@ from minichat.dataloader import data_loader
 from minichat.loss_eval import evaluate_bpb
 from minichat.tokenizer import get_token_bytes, get_tokenizer
 from base_eval import evaluate_model
+from minichat.checkpoint_manager import save_checkpoint
 
 sequence_len =  2048
-n_layers = 4
+n_layers = 6
 vocab_size = 65_536
 emb_dim = 64
 n_heads = 8
@@ -21,17 +23,20 @@ core_metric_every = 5
 
 num_iterations = 100
 eval_tokens = 20 * 256
+sample_every = 10
 
-# Optimizer params
-unembedding_lr = 0.004
-embedding_lr = 0.2
-matrix_lr = 0.02
+# Optimizer params - FIXED: Much lower learning rates
+unembedding_lr = 0.0001   # Was 0.004 (10x too high)
+embedding_lr = 0.0001     # Was 0.2 (500x too high!)
+matrix_lr = 0.0001        # Was 0.02 (50x too high)
 weight_decay = 0.0
 
 # LR Scheduler params
 warmup_ratio =0.0
 warmdown_ratio = 0.2
 final_lr_frac = 0.0
+
+model_tag = ""
 
 total_peak_memory = torch.cuda.max_memory_allocated
 
@@ -105,6 +110,35 @@ def get_lr_multiplier(step):
         return progress * 1.0 + (1 - progress) * final_lr_frac
 
 
+def sample_inference(model, prompt_tokens, max_new_tokens):
+    model.eval()
+    generated_tokens = list(prompt_tokens)
+    for token in model.generate(prompt_tokens, max_new_tokens):
+        generated_tokens.append(token)
+    return generated_tokens
+
+
+def inference(model, tokenizer):
+    model.eval()
+    prompts = [
+    "The capital of France is",
+    "The chemical symbol of gold is",
+    "If yesterday was Friday, then tomorrow will be",
+    "The opposite of hot is",
+    "The planets of the solar system are:",
+    "My favorite color is",
+    "If 5*x + 3 = 13, then x is",
+    ]
+    for prompt in prompts:
+        prompt_tokens = tokenizer.encode([prompt])[0]
+        generated_tokens = sample_inference(model, prompt_tokens, max_new_tokens=10)
+        generated_text = tokenizer.decode(generated_tokens)
+        print(f"Prompt: {prompt}\nGenerated: {generated_text}\n")
+    model.train()
+# --------- 
+
+
+
 min_val_bpb = float("inf")
 smooth_train_loss = 0 # EMA of training loss
 ema_beta = 0.9 # EMA decay factor
@@ -138,6 +172,9 @@ for step in range(num_iterations):
         loss.backward()
         x, y = next(train_loader)
 
+    # Add gradient clipping to prevent exploding gradients
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    
     lrm = get_lr_multiplier(step)
     for param_group in optimizer.param_groups:
         param_group['lr'] = param_group['initial_lr'] * lrm
@@ -158,6 +195,20 @@ for step in range(num_iterations):
     if step > 10:
         total_training_time += dt
     print(f"step {step:05d}/{num_iterations:05d} ({pct_done:.2f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt * 1000:.2f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.2f} | total time: {total_training_time/60:.2f}m")
+    if last_step or (step % 50 == 0):
+        output_dirname = model_tag if model_tag else f"d{n_layers}" # e.g. d12
+        checkpoint_dir = os.path.join(base_dir, "base_checkpoints", output_dirname)
+        save_checkpoint(checkpoint_dir, orig_model.state_dict(), optimizer.state_dict(), step, {
+            "step": step,
+            "val_bpb": val_bpb,
+            "model_config": model_config_kwargs,
+            "device_batch_size": device_batch_size,
+            "max_sequence_len": sequence_len,
+        })
+    if last_step or (step % sample_every == 0):
+        print("=== Sample Inference ===")
+        inference(orig_model, tokenizer)
+
 print(f"Total training time: {total_training_time/60:.2f}m")
 print(f"Peak Memory Usage: {total_peak_memory() / 1024 / 1024:.2f}MiB")  
 print(f"Minimum validation bpb: {min_val_bpb:.4f}")

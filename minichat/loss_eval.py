@@ -12,16 +12,19 @@ def evaluate_bpb(model, batches, steps, token_bytes):
         total_nats = sum(loss for valid tokens) Note: Special tokens such as <bos> are excluded (they carry y as -1)
     3. Calculate total bytes
         total_bytes = sum(token_bytes for valid tokens)
-    4. bpb = total_nats / log(2) * total_bytes
+    4. bpb = total_nats / log(2) / total_bytes
 
     '''
-    total_nats = torch.tensor(0.0, dtype=torch.float32, device=model.device())
+    model.eval()  # Ensure model is in eval mode
+    
+    total_nats = torch.tensor(0.0, dtype=torch.float64, device=model.device())  # Use float64 for precision
     total_bytes = torch.tensor(0, dtype=torch.int64, device=model.device())
 
     batch_iter = iter(batches)
     token_bytes = token_bytes.to(device=model.device())
 
-    for _ in range(steps):
+
+    for step_idx in range(steps):
         x, y = next(batch_iter)
         loss = model(x, y, loss_reduction='none')
         loss = loss.view(-1) # flatten
@@ -30,16 +33,25 @@ def evaluate_bpb(model, batches, steps, token_bytes):
             valid = (y>=0)
             y_safe = torch.where(valid, y, torch.zeros_like(y))
             num_bytes = torch.where(valid, token_bytes[y_safe], torch.zeros_like(y, dtype=token_bytes.dtype))
-            total_nats += (loss * (num_bytes > 0)).sum()
-            total_bytes += num_bytes.sum()
+            valid_loss = loss * (num_bytes > 0)
+            step_nats = valid_loss.sum()
+            step_bytes = num_bytes.sum()
         else:
             num_bytes = token_bytes[y]
-            total_nats += (loss *(num_bytes>0)).sum()
-            total_bytes += num_bytes.sum()
+            valid_loss = loss * (num_bytes > 0)
+            step_nats = valid_loss.sum()
+            step_bytes = num_bytes.sum()
+            
+        total_nats += step_nats
+        total_bytes += step_bytes
+           
+    total_nats_val = total_nats.item()
+    total_bytes_val = total_bytes.item()
         
-    total_nats = total_nats.item()
-    total_bytes = total_bytes.item()
-    if total_bytes == 0:
+    if total_bytes_val == 0:
+        print("ERROR: Zero total bytes!")
         return float('inf')
-    bpb = total_nats / (math.log(2) * total_bytes)
+        
+    # Correct BPB formula: nats/ln(2)/bytes = bits/bytes
+    bpb = total_nats_val / math.log(2) / total_bytes_val    
     return bpb
