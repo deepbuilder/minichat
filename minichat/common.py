@@ -6,6 +6,35 @@ import zipfile
 import torch
 import random
 import shutil
+import logging
+
+class ColoredFormatter(logging.Formatter):
+    """Logging Formatter to add colors based on log level."""
+    grey = "\x1b[38;21m"
+    yellow = "\x1b[33;21m"
+    red = "\x1b[31;21m"
+    bold_red = "\x1b[31;1m"
+    reset = "\x1b[0m"
+    COLORS = {
+        'DEBUG': grey,
+        'INFO': grey,
+        'WARNING': yellow,
+        'ERROR': red,
+        'CRITICAL': bold_red
+    }
+    def  format(self, record):
+        # Add color to the level name
+        levelname = record.levelname
+        if levelname in self.COLORS:
+            levelname_color = self.COLORS[levelname] + levelname + self.reset
+            record.levelname = levelname_color
+        message = super().format(record)
+        if levelname == 'INFO':
+            # highlight numbers and percentages in info messages
+            import re
+            message = re.sub(r'(\d+\.?\d*\s*(?:GB|MB|%|docs))', rf'{self.BOLD}\1{self.RESET}', message)
+            message = re.sub(r'(Shard \d+)', rf'{self.COLORS["INFO"]}{self.BOLD}\1{self.RESET}', message)   
+        return message
 
 def is_ddp():
     return int(os.environ.get("RANK", "-1")) != -1
@@ -81,3 +110,52 @@ def place_eval_bundle(file_path):
         extracted_bundle_dir = os.path.join(tmpdir, "eval_bundle")
         shutil.move(extracted_bundle_dir, eval_bundle_dir)
     print(f"Placed eval_bundle directory at {eval_bundle_dir}")
+
+
+def is_ddp():
+    return int(os.environ.get("RANK", "-1")) != -1
+
+def get_dist_info():
+    if is_ddp():
+        assert "RANK" in os.environ and "WORLD_SIZE" in os.environ and "LOCAL_RANK" in os.environ, "RANK, WORLD_SIZE, and LOCAL_RANK must be set in DDP mode"
+        rank = int(os.environ["RANK"])
+        local_rank = int(os.environ["LOCAL_RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        return True, rank, local_rank, world_size
+    else:
+        return False, 0, 0, 1
+
+def compute_init():
+    assert torch.cuda.is_available(), "CUDA must be available for compute initialization"
+    torch.manual_seed(42)
+    torch.set_float32_matmul_precision('high')
+    ddp, rank, local_rank, world_size = get_dist_info()
+    if ddp:
+        torch.cuda.set_device(local_rank)
+        torch.distributed.init_process_group(backend='nccl', init_method='env://')
+        torch.distributed.barrier()
+        print(f"Initialized DDP: rank {rank}, local_rank {local_rank}, world_size {world_size}")
+    return ddp, rank, local_rank, world_size
+
+def compute_cleanup():
+    ddp, rank, local_rank, world_size = get_dist_info()
+    if ddp:
+        torch.distributed.barrier()
+        torch.distributed.destroy_process_group()
+
+class DummyWandb:
+    def __init__(self):
+        pass
+    def log(self, *args, **kwargs):
+        pass
+    def finish(self):
+        pass
+
+
+def setup_logger():
+    handler = logging.StreamHandler()
+    handler.setFormatter(ColoredFormatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+def find_rank():
+    return int(os.environ.get("RANK", "0"))

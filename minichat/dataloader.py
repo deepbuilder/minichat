@@ -5,11 +5,13 @@ import torch
 from minichat.common import get_ddp_info
 from minichat.tokenizer import get_tokenizer
 from minichat.dataset import list_files, iter_batched
+from minichat.common import get_ddp_info
 
 
 
 def data_loader(B, T, split, tokenizer_batch_size=16, tokenizer_threds=4, device='cuda'):
     assert split in ['train', 'val'], f"Invalid split: {split}"
+    ddp, rank, local_rank, world_size = get_ddp_info()
     needed_tokens = B*T + 1
     tokenizer = get_tokenizer()
     bos_token_id = tokenizer.get_bos_token_id()
@@ -18,7 +20,7 @@ def data_loader(B, T, split, tokenizer_batch_size=16, tokenizer_threds=4, device
 
     def document_batches():
         while True:
-            for batch in iter_batched(split):
+            for batch in iter_batched(split, step=world_size, start=rank):
                 for i in range(0, len(batch), tokenizer_batch_size):
                     yield batch[i:i + tokenizer_batch_size]
     

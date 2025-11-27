@@ -1,10 +1,43 @@
 import random
 import torch
 from jinja2 import Template
+import torch.distributed as dist
 
 
+def render_prompt_mc(item, continuation_delimiter, fewshot_examples=None):
+    template_str = """
+{%- for example in fewshot_examples -%}
+{{example.query}}{{ continuation_delimiter }}{{example.choices[example.gold]}}
 
-def render_prompt(item, continuation_delimiter, fewshot_examples=None):
+{% endfor -%}
+{{ item.query }}{{ continuation_delimiter }}{{choice}}""".strip()
+    template = Template(template_str)
+    fewshot_examples = fewshot_examples if fewshot_examples is not None else []
+    contexts = {
+        'fewshot_examples': fewshot_examples,
+        'continuation_delimiter': continuation_delimiter,
+        'item': item,
+    }
+    prompts = [template.render(choice=choice, **contexts) for choice in item['choices']]
+    return prompts
+
+def render_prompt_schema(item, continuation_delimiter, fewshot_examples=None):
+    template_str = """
+{%- for example in fewshot_examples -%}
+{{ example.context_options[example.gold] }}{{ continuation_delimiter }}{{ example.continuation }}
+
+{% endfor -%}
+{{context}}{{ continuation_delimiter }}{{ item.continuation }}""".strip()
+    template = Template(template_str)
+    params = {
+        'item': item,
+        'continuation_delimiter': continuation_delimiter,
+        'fewshot_examples': fewshot_examples if fewshot_examples is not None else [],
+    }
+    prompts = [template.render(context=context, **params) for context in item['context_options']]
+    return prompts
+
+def render_prompt_lm(item, continuation_delimiter, fewshot_examples=None):
     template_str = """
 {%- for example in fewshot_examples -%}
 {{ example.context | trim }}{{ continuation_delimiter }}{{ example.continuation }}
@@ -22,7 +55,45 @@ def render_prompt(item, continuation_delimiter, fewshot_examples=None):
     prompt_without = prompt_without.strip()
     return [prompt_without, prompt_with]
 
-def batch_sequences(prompts, tokenizer, device):
+def find_common_length(sequences, direction='prefix'):
+    if direction == 'prefix':
+        min_len = min(len(seq) for seq in sequences)
+        common_len = 0
+        for i in range(min_len):
+            token = sequences[0][i]
+            if all(seq[i] == token for seq in sequences):
+                common_len += 1
+            else:
+                break
+        return common_len
+    elif direction == 'suffix':
+        min_len = min(len(seq) for seq in sequences)
+        common_len = 0
+        for i in range(1, min_len + 1):
+            token = sequences[0][-i]
+            if all(seq[-i] == token for seq in sequences):
+                common_len += 1
+            else:
+                break
+        return common_len
+    else:
+        raise ValueError("direction must be 'prefix' or 'suffix'")
+
+def batch_sequences_mc(prompts, tokenizer):
+    tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
+    answer_start_idx = find_common_length(tokens, direction='prefix')
+    start_ids = [answer_start_idx] * len(prompts)
+    end_ids = [len(t) for t in tokens]
+    return tokens, start_ids, end_ids
+
+def batch_sequences_schema(prompts, tokenizer):
+    tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
+    answer_start_idx = find_common_length(tokens, direction='suffix')
+    start_ids = [len(t) - answer_start_idx for t in tokens]
+    end_ids = [len(t) for t in tokens]
+    return tokens, start_ids, end_ids
+
+def batch_sequences_lm(prompts, tokenizer):
     tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
     tokens_without, tokens_with = tokens
     start_idx, end_idx = len(tokens_without), len(tokens_with)
@@ -61,10 +132,16 @@ def evaluate_example(idx, data, task_meta, model, tokenizer, device):
         fewshot_indices = rng.sample(available_indices, num_fewshot)
         fewshot_examples = [data[i] for i in fewshot_indices]
     
-    if task_type  == 'language_modeling':
-        prompts = render_prompt(item, continuation_delimiter, fewshot_examples)
-        tokens, start_idxs, end_idxs = batch_sequences(prompts, tokenizer, device)
-    
+    if task_type == 'multiple_choice':
+        prompts = render_prompt_mc(item, continuation_delimiter, fewshot_examples)
+        tokens, start_idxs, end_idxs = batch_sequences_mc(prompts, tokenizer)
+    elif task_type == 'schema':
+        prompts = render_prompt_schema(item, continuation_delimiter, fewshot_examples)
+        tokens, start_idxs, end_idxs = batch_sequences_schema(prompts, tokenizer)
+    elif task_type  == 'language_modeling':
+        prompts = render_prompt_lm(item, continuation_delimiter, fewshot_examples)
+        tokens, start_idxs, end_idxs = batch_sequences_lm(prompts, tokenizer)
+
     if hasattr(model, 'config') and hasattr(model.config, 'sequence_len'):
         max_tokens = model.config.sequence_len
         new_tokens, new_start_idxs, new_end_idxs = [], [], []
@@ -94,9 +171,15 @@ def evaluate_example(idx, data, task_meta, model, tokenizer, device):
 
 
 def evaluate_task(data, task_meta, model, tokenizer, device):
-    correct = torch.zeros(len(data))
-    for i in range(len(data)):
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    size = dist.get_world_size() if dist.is_initialized() else 1
+
+    correct = torch.zeros(len(data), dtype=torch.float32, device=device)
+    for i in range(rank, len(data), size):
         is_correct = evaluate_example(i, data, task_meta, model, tokenizer, device)
-        correct[i] = float(is_correct)      
+        correct[i] = float(is_correct)
+    if size > 1:
+        dist.barrier()
+        dist.all_reduce(correct, op=dist.ReduceOp.SUM)      
     mean_correct = correct.mean().item()
     return mean_correct

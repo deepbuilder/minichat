@@ -16,6 +16,17 @@ class GPTConfig:
 def norm(x):
     return F.rms_norm(x, (x.size(-1),))
 
+def apply_rotary_pos_emb(x, sin, cos):
+    assert x.dim() == 4  # B, H, T, D
+    B, H, T, D = x.shape
+    d = D // 2
+    x1, x2 = x[..., :d], x[..., d:]
+    y1 = x1 * cos + x2 * sin
+    y2 = -x1 * sin + x2 * cos
+    out = torch.cat([y1, y2], dim=-1)
+    out = out.to(x.dtype)
+    return out
+
 # (softmax(qT * k)/sqrt(d_k))*v
 
 class CausalSelfAttention(nn.Module):
@@ -71,11 +82,15 @@ class GPT(nn.Module):
         self.config = config
         self.transformer = nn.ModuleDict({
             "wte": nn.Embedding(config.vocab_size, config.emb_dim),
-            "wpe": nn.Embedding(config.sequence_len, config.emb_dim),  # Added positional embeddings
             "h": nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layers)])
         })
         self.lm_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False)
-        
+        self.rotary_seq_len = config.sequence_len * 10
+        head_dim = config.emb_dim // config.n_heads
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim, device='cuda')
+        self.register_buffer("cos", cos, persistent=False)
+        self.register_buffer("sin", sin, persistent=False)
+
         # Initialize weights
         self.init_weights()
 
@@ -89,10 +104,25 @@ class GPT(nn.Module):
     
     def init_weights(self):
         self.apply(self._init_weights)
-        # Apply special scaling to residual projections (GPT-2 style)
+        torch.nn.init.zeros_(self.lm_head.bias)
         for block in self.transformer.h:
             torch.nn.init.zeros_(block.attn.c_proj.weight)
             torch.nn.init.zeros_(block.mlp.c_proj.weight)
+        head_dim = self.config.emb_dim // self.config.n_heads
+        cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim, device='cuda')
+        self.cos.copy_(cos)
+        self.sin.copy_(sin)
+        self.transformer.wte.to(dtype=torch.bfloat16)
+    
+    def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device='cuda'):
+        channel_range = torch.arange(0, head_dim, 2, device=device, dtype=torch.float32)
+        inv_freq = 1.0 / (base ** (channel_range / head_dim))
+        t = torch.arange(seq_len, device=device, dtype=torch.float32)
+        freqs = torch.outer(t, inv_freq)  # (seq_len, head_dim/2)
+        cos, sin = freqs.cos(), freqs.sin()  # (seq_len, head_dim/2)
+        cos, sin = cos.bfloat16(), sin.bfloat16()
+        cos, sin = cos[None, :, None, :], sin[None, :, None, :]  # (1, seq_len, 1, head_dim/2)
+        return cos, sin
     
     def device(self):
         return next(self.parameters()).device
@@ -100,7 +130,7 @@ class GPT(nn.Module):
     def setup_optimizers(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0):
         model_dim = self.config.emb_dim
         matrix_params = list(self.transformer.h.parameters())
-        embedding_params = list(self.transformer.wte.parameters()) + list(self.transformer.wpe.parameters())
+        embedding_params = list(self.transformer.wte.parameters())
         unembedding_params = list(self.lm_head.parameters())
         assert len(list(self.parameters())) == len(matrix_params) + len(embedding_params) + len(unembedding_params), "Parameter count mismatch in optimizer setup"
         dmodel_lr_scale = model_dim/768 ** -0.5
@@ -117,58 +147,75 @@ class GPT(nn.Module):
         return optimizer
 
     
-    def forward(self, idx, targets=None, loss_reduction='mean'):
+    def forward(self, idx, targets=None, kv_cache=None, loss_reduction='mean'):
         B, T = idx.size()
         assert T <= self.config.sequence_len, f"Cannot forward sequence of length {T}, max is {self.config.sequence_len}"
-        
-        # Token and position embeddings
-        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)  # shape (T)
-        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (B, T, emb_dim)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (T, emb_dim)
-        x = tok_emb + pos_emb  # (B, T, emb_dim)
+        assert idx.device == self.cos.device, f"Rotary embeddings are on {self.cos.device}, but input is on {idx.device}"
+        assert self.cos.dtype == torch.bfloat16, "Rotary embeddings must be in bfloat16"
+
+        T0 = 0 if kv_cache is None else kv_cache.get_pos()
+        cos_sin = self.cos[:, T0:T0+T], self.sin[:, T0:T0+T]  # (1, T, 1, head_dim/2)
+
+        x = self.transformer.wte(idx)  # token embeddings of shape (B, T, emb_dim)
         
         # Apply initial norm
         x = norm(x)
         
         # Forward through transformer blocks
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, cos_sin, kv_cache)
         
         # Final norm
         x = norm(x)
-        
+        softcap = 15
         if targets is not None:
             # Training mode: compute loss
             logits = self.lm_head(x)
-            logits = logits.float()               
+            logits = softcap * torch.tanh(logits / softcap)
+            logits = logits.float()              
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction=loss_reduction)
             return loss
         else:
             # Inference mode: return logits
             logits = self.lm_head(x)
+            logits = softcap * torch.tanh(logits / softcap)
+            logits = logits.float()              
             return logits
     
-    def generate(self, tokens, max_tokens):
+    @torch.inference_mode()
+    def generate(self, tokens, max_tokens, temperature=1.0, top_k=None, seed=42):
+        assert isinstance(tokens, list), "Input tokens should be a list of token IDs"
         device = self.device()
+        rng = None
+        if temperature > 0.0:
+            rng = torch.Generator(device=device)
+            rng.manual_seed(seed)
+        
         ids = torch.tensor([tokens], dtype=torch.long, device=device)
         
-        with torch.no_grad():
-            for _ in range(max_tokens):
-                # Crop ids to the last sequence_len tokens if it gets too long
-                ids_cond = ids if ids.size(1) <= self.config.sequence_len else ids[:, -self.config.sequence_len:]
-                
-                logits = self.forward(ids_cond)  # B, T, vocab_size
-                logits = logits[:, -1, :]  # Take the last time step
+        for _ in range(max_tokens):
+            # Crop ids to the last sequence_len tokens if it gets too long
+            ids_cond = ids if ids.size(1) <= self.config.sequence_len else ids[:, -self.config.sequence_len:]
+            
+            logits = self.forward(ids_cond)  # B, T, vocab_size
+            logits = logits[:, -1, :]  # Take the last time step
+            if top_k is not None:
+                topk_values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < topk_values[:, [-1]]] = -float('Inf')
+            if temperature > 0.0:
+                logits = logits / temperature
                 probs = F.softmax(logits, dim=-1)
-                next_ids = torch.multinomial(probs, num_samples=1)
-                ids = torch.cat((ids, next_ids), dim=1)
-                token = next_ids.item()
-                yield token
+                next_ids = torch.multinomial(probs, num_samples=1, generator=rng)
+            else:
+                next_ids = torch.argmax(logits, dim=-1, keepdim=True)
+            ids = torch.cat((ids, next_ids), dim=1)
+            token = next_ids.item()
+            yield token
     
     def estimate_flops_per_token(self):
         # Rough estimate of FLOPs per token during training
         nparams = sum(p.numel() for p in self.parameters())
-        nparams_embedding = self.transformer.wte.weight.numel() + self.transformer.wpe.weight.numel()
+        nparams_embedding = self.transformer.wte.weight.numel()
         l, h, q, t = self.config.n_layers, self.config.n_heads, self.config.emb_dim // self.config.n_heads, self.config.sequence_len
         num_flops_per_token = 6 * (nparams - nparams_embedding) + 12 * l * h * q * t
         return num_flops_per_token

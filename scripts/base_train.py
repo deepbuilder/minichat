@@ -10,6 +10,7 @@ from minichat.tokenizer import get_token_bytes, get_tokenizer
 from base_eval import evaluate_model
 from minichat.checkpoint_manager import save_checkpoint
 
+# Model hyperparameters
 sequence_len =  2048
 n_layers = 6
 vocab_size = 65_536
@@ -17,24 +18,32 @@ emb_dim = 64
 n_heads = 8
 device = "cuda"
 
+# Training params
+num_iterations = -1
+target_flops = -1
+target_param_data_ratio = 20
+
+# Optimization
 device_batch_size = 4
 total_batch_size = 256 # in tokens
-core_metric_every = 5
-
-num_iterations = 100
-eval_tokens = 20 * 256
-sample_every = 10
-
-# Optimizer params - FIXED: Much lower learning rates
 unembedding_lr = 0.0001   # Was 0.004 (10x too high)
 embedding_lr = 0.0001     # Was 0.2 (500x too high!)
 matrix_lr = 0.0001        # Was 0.02 (50x too high)
 weight_decay = 0.0
-
-# LR Scheduler params
 warmup_ratio =0.0
 warmdown_ratio = 0.2
 final_lr_frac = 0.0
+# Evaluation
+eval_every = 20
+eval_tokens = 20 * 256
+core_metric_every = 5
+core_metric_max_per_task = 100
+sample_every = 10
+
+# Output
+config_keys = [k for k, v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, str, bool))]
+user_config = {k: globals()[k] for k in config_keys}
+
 
 model_tag = ""
 
