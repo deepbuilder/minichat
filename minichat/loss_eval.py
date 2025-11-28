@@ -37,19 +37,19 @@ def evaluate_bpb(model, batches, steps, token_bytes):
             total_bytes += num_bytes.sum()
         else:
             num_bytes = token_bytes[y]
-            total_nats += (loss *(num_bytes > 0)).sum()
+            total_nats += (loss * (num_bytes > 0)).sum()
             total_bytes += num_bytes.sum()
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     if world_size > 1:
         dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
         dist.all_reduce(total_bytes, op=dist.ReduceOp.SUM)
             
-    total_nats_val = total_nats.item()
-    total_bytes_val = total_bytes.item()
+    total_nats = total_nats.item()
+    total_bytes = total_bytes.item()
         
-    if total_bytes_val == 0:
+    if total_bytes == 0:
         return float('inf')
         
     # Correct BPB formula: nats/ln(2)/bytes = bits/bytes
-    bpb = total_nats_val /( math.log(2) * total_bytes_val )   
+    bpb = total_nats /( math.log(2) * total_bytes )   
     return bpb

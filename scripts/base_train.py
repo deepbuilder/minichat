@@ -29,9 +29,9 @@ target_param_data_ratio = 20
 # Optimization
 device_batch_size = 4
 total_batch_size = 64 * 4096 # in tokens
-unembedding_lr = 0.0001   # Was 0.004 (10x too high)
-embedding_lr = 0.0001     # Was 0.2 (500x too high!)
-matrix_lr = 0.0001        # Was 0.02 (50x too high)
+unembedding_lr = 0.004   
+embedding_lr = 0.2   
+matrix_lr = 0.02   
 grad_clip = 1.0 
 weight_decay = 0.0
 warmup_ratio =0.0
@@ -40,9 +40,9 @@ final_lr_frac = 0.0
 resume_from_step = -1
 
 # Evaluation
-eval_every = 20
-eval_tokens = 20 * 256
-core_metric_every = 5
+eval_every = 250
+eval_tokens = 64 * 4096 * 16  # in tokens
+core_metric_every = 2000
 core_metric_max_per_task = 100
 sample_every = 10
 save_every = -1
@@ -244,9 +244,9 @@ while True:
 
     if step % eval_every == 0 or last_step:
         model.eval()
-        eval_steps = eval_tokens
+        eval_steps = eval_tokens // (device_batch_size * max_seq_len* world_size)
         with autocast_ctx:
-            val_bpb = evaluate_bpb(model, val_loader, steps=1, token_bytes=token_bytes)
+            val_bpb = evaluate_bpb(model, val_loader, steps=eval_steps, token_bytes=token_bytes)
         print_log(f"Step {step:05d}, Validation BPB: {val_bpb:.4f}")
         if val_bpb < min_val_bpb:
             min_val_bpb = val_bpb
