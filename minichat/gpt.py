@@ -12,6 +12,7 @@ class GPTConfig:
     vocab_size: int = 65_536
     emb_dim: int = 128
     n_heads: int = 8
+    n_kv_heads: int = 8
 
 def norm(x):
     return F.rms_norm(x, (x.size(-1),))
@@ -34,20 +35,45 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         self.layer_idx = layer_idx
         self.n_heads = config.n_heads
+        self.n_kv_heads = config.n_kv_heads
         self.head_dim = config.emb_dim // config.n_heads
+        assert self.head_dim * config.n_heads == config.emb_dim, "emb_dim must be divisible by n_heads"
+        assert self.n_kv_heads <= self.n_heads and self.n_heads % self.n_kv_heads == 0, "n_kv_heads must be less than or equal to n_heads and n_heads must be divisible by n_kv_heads"
         self.c_q = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
-        self.c_k = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
-        self.c_v = nn.Linear(config.emb_dim, self.n_heads * self.head_dim, bias=False)
+        self.c_k = nn.Linear(config.emb_dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.c_v = nn.Linear(config.emb_dim, self.n_kv_heads * self.head_dim, bias=False)
         self.c_proj = nn.Linear(config.emb_dim, config.emb_dim, bias=False)
     
-    def forward(self, x):
+    def forward(self, x, cos_sin, kv_cache=None):
         B,T,C = x.shape
         q = self.c_q(x).view(B, T, self.n_heads, self.head_dim) # B, T, H, D
-        k = self.c_k(x).view(B, T, self.n_heads, self.head_dim) # B, T, H, D
-        v = self.c_v(x).view(B, T, self.n_heads, self.head_dim) # B, T, H, D
+        k = self.c_k(x).view(B, T, self.n_kv_heads, self.head_dim) # B, T, H, D
+        v = self.c_v(x).view(B, T, self.n_kv_heads, self.head_dim) # B, T, H, D
+
+        # Appy rotary embeddings
+        cos, sin = cos_sin
+        q, k = apply_rotary_pos_emb(q, sin, cos), apply_rotary_pos_emb(k, sin, cos)
+        q, k = norm(q), norm(k)
         q, k, v = q.transpose(1, 2), k.transpose(1,2), v.transpose(1,2)
-        q, k, v = norm(q), norm(k), norm(v)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # B, H, T, D
+
+        # Apply KV cache if provided
+        if kv_cache is not None:
+            k, v = kv_cache.insert_kv(self.layer_idx, k, v)
+        
+        Tq, Tk = q.size(2), k.size(2)
+
+        enable_gqa = self.n_heads != self.n_kv_heads
+        if kv_cache is None or Tq == Tk:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=enable_gqa) # B, H, T, D
+        elif Tq ==1:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=False, enable_gqa=enable_gqa) # B, H, 1, D
+        else:
+            attn_mask = torch.zeros((Tq, Tk), dtype=torch.bool, device=q.device)
+            prefix_len = Tk - Tq
+            if prefix_len > 0:
+                attn_mask[:, :prefix_len] = True
+            attn_mask[:, :prefix_len] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=False, enable_gqa=enable_gqa) # B, H, T, D
         y = y.transpose(1,2).contiguous().view(B, T, -1)
         y = self.c_proj(y)
         return y
@@ -71,8 +97,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
     
-    def forward(self, x):
-        x = x + self.attn(norm(x))
+    def forward(self, x, cos_sin, kv_cache=None):
+        x = x + self.attn(norm(x), cos_sin, kv_cache)
         x = x + self.mlp(norm(x))
         return x
 
@@ -104,7 +130,7 @@ class GPT(nn.Module):
     
     def init_weights(self):
         self.apply(self._init_weights)
-        torch.nn.init.zeros_(self.lm_head.bias)
+        torch.nn.init.zeros_(self.lm_head.weight)
         for block in self.transformer.h:
             torch.nn.init.zeros_(block.attn.c_proj.weight)
             torch.nn.init.zeros_(block.mlp.c_proj.weight)
@@ -124,10 +150,10 @@ class GPT(nn.Module):
         cos, sin = cos[None, :, None, :], sin[None, :, None, :]  # (1, seq_len, 1, head_dim/2)
         return cos, sin
     
-    def device(self):
+    def get_device(self):
         return next(self.parameters()).device
     
-    def setup_optimizers(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0):
+    def setup_optimizer(self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0):
         model_dim = self.config.emb_dim
         matrix_params = list(self.transformer.h.parameters())
         embedding_params = list(self.transformer.wte.parameters())

@@ -80,21 +80,21 @@ def find_common_length(sequences, direction='prefix'):
         raise ValueError("direction must be 'prefix' or 'suffix'")
 
 def batch_sequences_mc(prompts, tokenizer):
-    tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
+    tokens = tokenizer(prompts, prepend=tokenizer.get_bos_token_id())
     answer_start_idx = find_common_length(tokens, direction='prefix')
     start_ids = [answer_start_idx] * len(prompts)
     end_ids = [len(t) for t in tokens]
     return tokens, start_ids, end_ids
 
 def batch_sequences_schema(prompts, tokenizer):
-    tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
+    tokens = tokenizer(prompts, prepend=tokenizer.get_bos_token_id())
     answer_start_idx = find_common_length(tokens, direction='suffix')
     start_ids = [len(t) - answer_start_idx for t in tokens]
     end_ids = [len(t) for t in tokens]
     return tokens, start_ids, end_ids
 
 def batch_sequences_lm(prompts, tokenizer):
-    tokens = tokenizer.encode(prompts, prepand=tokenizer.get_bos_token_id())
+    tokens = tokenizer(prompts, prepend=tokenizer.get_bos_token_id())
     tokens_without, tokens_with = tokens
     start_idx, end_idx = len(tokens_without), len(tokens_with)
     return [tokens_with], [start_idx], [end_idx]

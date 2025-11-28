@@ -130,12 +130,14 @@ def compute_init():
     torch.manual_seed(42)
     torch.set_float32_matmul_precision('high')
     ddp, rank, local_rank, world_size = get_dist_info()
+    print(f"DDP: {ddp}, Rank: {rank}, Local Rank: {local_rank}, World Size: {world_size}")
+    device = torch.device("cuda", local_rank)
     if ddp:
         torch.cuda.set_device(local_rank)
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
         torch.distributed.barrier()
         print(f"Initialized DDP: rank {rank}, local_rank {local_rank}, world_size {world_size}")
-    return ddp, rank, local_rank, world_size
+    return ddp, rank, local_rank, world_size, device
 
 def compute_cleanup():
     ddp, rank, local_rank, world_size = get_dist_info()
@@ -159,3 +161,7 @@ def setup_logger():
 
 def find_rank():
     return int(os.environ.get("RANK", "0"))
+
+def print_log(s="",**kwargs):
+    if find_rank() == 0:
+        print(s, **kwargs)

@@ -53,7 +53,8 @@ def download_file(index):
         return False
 
 def list_files(data_dir=DATA_DIR):
-    return [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.parquet')]
+    parquet_files = sorted(f for f in os.listdir(data_dir) if f.endswith('.parquet') and not f.endswith('.tmp'))
+    return [os.path.join(data_dir, f) for f in parquet_files]
 
 
 def iter_batched(split, start=0, step=1):
@@ -62,9 +63,10 @@ def iter_batched(split, start=0, step=1):
     paths = all_files[:-1] if split == 'train' else all_files[-1:]
     for file_path in paths:
         pf = pq.ParquetFile(file_path)
-        for i in range(start, pf.num_row_groups, step):
-            table = pf.read_row_group(i)
-            yield table.column('text').to_pylist()
+        for rg_idx in range(start, pf.num_row_groups, step):
+            rg = pf.read_row_group(rg_idx)
+            texts = rg.column('text').to_pylist()
+            yield texts
 
 
 if __name__ == '__main__':

@@ -13,31 +13,36 @@ def log(message):
     if find_rank() == 0:
         logger.info(message)
     
-def save_checkpoint(check_dir, step, model, optimizer, meta_data):
-    os.makedirs(check_dir, exist_ok=True)
-    checkpoint_path = os.path.join(check_dir, f'checkpoint_{step:06d}.pt')
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'meta_data': meta_data
-    }, checkpoint_path)
-    log(f"Checkpoint saved at {checkpoint_path}")
-    if optimizer.state is not None:
-        optimizer_state_path = os.path.join(check_dir, f'optimizer_state_{step:06d}.pt')
-        torch.save(optimizer.state_dict(), optimizer_state_path)
-        log(f"Optimizer state saved at {optimizer_state_path}")
-    meta_data_path = os.path.join(check_dir, f'meta_data_{step:06d}.json')
-    with open(meta_data_path, 'w') as f:
-        json.dump(meta_data, f, indent=4)
-    log(f"Meta data saved at {meta_data_path}")
+def save_checkpoint(check_dir, step, model, optimizer, meta_data, rank=0):
+    if rank == 0:
+        os.makedirs(check_dir, exist_ok=True)
+        checkpoint_path = os.path.join(check_dir, f'checkpoint_{step:06d}.pt')
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'meta_data': meta_data
+        }, checkpoint_path)
+        log(f"Checkpoint saved at {checkpoint_path}")
+        if optimizer.state is not None:
+            optimizer_state_path = os.path.join(check_dir, f'optimizer_state_{step:06d}.pt')
+            torch.save(optimizer.state_dict(), optimizer_state_path)
+            log(f"Optimizer state saved at {optimizer_state_path}")
+        meta_data_path = os.path.join(check_dir, f'meta_data_{step:06d}.json')
+        with open(meta_data_path, 'w') as f:
+            json.dump(meta_data, f, indent=4)
+        log(f"Meta data saved at {meta_data_path}")
+    if optimizer_data is not None:
+        optimizer_path = os.path.join(check_dir, f'optim_{step:06d}_rank{rank:d}.pt')
+        torch.save(optimizer_data, optimizer_path)
+        log(f"Optimizer data saved at {optimizer_path}")
     
-def load_checkpoint(checkpoint_path, step, device=None, load_optimizer=False):
+def load_checkpoint(checkpoint_path, step, device=None, load_optimizer=False, rank=0):
     model_path = os.path.join(checkpoint_path, f'model_{step:06d}.pt')
     model_data = torch.load(model_path, map_location=device)
 
     optimizer_data = None
     if load_optimizer:
-        optimizer_path = os.path.join(checkpoint_path, f'optim_{step:06d}.pt' )
+        optimizer_path = os.path.join(checkpoint_path, f'optim_{step:06d}_rank{rank:d}.pt')
         optimizer_data = torch.load(optimizer_path, map_location=device)
 
     meta_path = os.path.join(checkpoint_path, f'meta_{step:06d}.json')
