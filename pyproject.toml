@@ -22,8 +22,8 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=65", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.10.2"]
+build-backend = "maturin"
 
 # target torch to cuda 12.8
 [tool.uv.sources]
@@ -40,6 +40,11 @@ explicit = true
 dev = [
     "pytest>=8.0.0",
 ]
+
+[tool.maturin]
+python-source = "."
+module-name = "minichat.rustbpe"
+manifest-path = "rustbpe/Cargo.toml"
 
 [tool.setuptools.packages.find]
 include = ["minichat*"]
