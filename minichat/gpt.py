@@ -72,7 +72,7 @@ class CausalSelfAttention(nn.Module):
             prefix_len = Tk - Tq
             if prefix_len > 0:
                 attn_mask[:, :prefix_len] = True
-            attn_mask[:, :prefix_len] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
+            attn_mask[:, prefix_len:] = torch.tril(torch.ones((Tq, Tq), dtype=torch.bool, device=q.device))
             y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=False, enable_gqa=enable_gqa) # B, H, T, D
         y = y.transpose(1,2).contiguous().view(B, T, -1)
         y = self.c_proj(y)

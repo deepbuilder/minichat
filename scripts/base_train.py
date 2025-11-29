@@ -13,6 +13,7 @@ from minichat.tokenizer import get_token_bytes, get_tokenizer
 from scripts.base_eval import evaluate_model
 from minichat.checkpoint import save_checkpoint, load_checkpoint
 from minichat.common import get_ddp_info, print_log, DummyWandb, compute_cleanup, compute_init
+from minichat.engine import Engine
 
 run = "dummy_run"
 device_type = "cuda"
@@ -228,14 +229,19 @@ def inference(model, tokenizer):
     "My favorite color is",
     "If 5*x + 3 = 13, then x is",
     ]
+    engine = Engine(model, tokenizer)
     for prompt in prompts:
-        prompt_tokens = tokenizer([prompt])[0]
-        generated_tokens = sample_inference(model, prompt_tokens, max_new_tokens=10)
-        generated_text = tokenizer.decode(generated_tokens)
-        print_log(f"Prompt: {prompt}\nGenerated: {generated_text}\n")
+        prompt_tokens = tokenizer.encode(prompt, prepend=tokenizer.get_bos_token_id())
+        with autocast_ctx:
+            sample = engine.generate_batch(
+                tokens=prompt_tokens,
+                num_samples=1,
+                max_tokens=16,
+                temperature=0
+            )
+        print_log(tokenizer.decode(sample[0]))
     model.train()
 # --------- 
-
 
 # Training loop
 while True:
@@ -277,8 +283,10 @@ while True:
         })
         model.train()
     
-    if master_rank and (last_step or (save_every > 0 and step % save_every == 0)):
+    if master_rank and (last_step or (sample_every > 0 and step % sample_every == 0)):
+        # Inference samples
         inference(orig_model, tokenizer)
+
     
     if last_step or (step >0 and step != resume_from_step and save_every > 0 and step % save_every == 0):
         save_checkpoint(

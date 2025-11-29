@@ -6,8 +6,8 @@ The minimal full-stack ChatGPT clone
 
 ### Prerequisites
 - Python 3.10-3.13
+- Rust (for tokenizer)
 - CUDA 12.8 compatible GPU (optional, for GPU acceleration)
-- Rust (for building the tokenizer extension)
 
 ### Setup Instructions
 
@@ -28,26 +28,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
 source .venv/bin/activate  # On macOS/Linux
 
-# Install the package and dependencies
+# Install the package and dependencies (this will automatically build the Rust extension)
 uv pip install -e .
-
-# Install development dependencies (optional)
-uv pip install -e ".[dev]"
 
 # Install the environment as a Jupyter kernel
 python -m ipykernel install --user --name=minichat --display-name="minichat"
-```
-
-#### 4. Install Rust and Build Tokenizer
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-# Add maturin to the virtual environment
-uv add maturin
-
-# Build and install the Rust tokenizer extension
-uv run maturin develop --release --manifest-path rustbpe/Cargo.toml
 ```
 
 ## Quick Start
@@ -62,8 +47,8 @@ python -m minichat.dataset -w 100
 # Train the tokenizer
 python -m scripts.tok_train --max_chars=4000000000
 
-
 # Train the model
+torchrun --standalone --nproc_per_node=2 -m scripts.base_train -- --depth=4 --device_batch_size=8
 
 ```
 
@@ -78,7 +63,7 @@ python -m scripts.tok_train --max_chars=4000000000
 - [x] Add Inference engine
 - [x] Use Muon optimizer
 - [x] DDP support
-- [ ] Inference Engine
+- [x] Inference Engine
 - [ ] Training on full dataset
 - [ ] SFT training
 - [ ] RLHF training

@@ -18,12 +18,11 @@ dependencies = [
     "wandb>=0.21.3",
     "ipykernel (>=7.0.1,<8.0.0)",
     "matplotlib>=3.10.7",
-    "maturin>=1.10.2",
 ]
 
 [build-system]
-requires = ["maturin>=1.10.2"]
-build-backend = "maturin"
+requires = ["setuptools>=61.0", "setuptools-rust", "wheel"]
+build-backend = "setuptools.build_meta"
 
 # target torch to cuda 12.8
 [tool.uv.sources]
@@ -41,14 +40,13 @@ dev = [
     "pytest>=8.0.0",
 ]
 
-[tool.maturin]
-python-source = "."
-module-name = "minichat.rustbpe"
-manifest-path = "rustbpe/Cargo.toml"
-
 [tool.setuptools.packages.find]
 include = ["minichat*"]
 exclude = ["rustbpe*"]
+
+[[tool.setuptools-rust.ext-modules]]
+target = "rustbpe"
+path = "rustbpe/Cargo.toml"
 
 [tool.pytest.ini_options]
 markers = [
