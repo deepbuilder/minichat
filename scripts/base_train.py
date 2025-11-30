@@ -15,11 +15,11 @@ from minichat.checkpoint import save_checkpoint, load_checkpoint
 from minichat.common import get_ddp_info, print_log, DummyWandb, compute_cleanup, compute_init
 from minichat.engine import Engine
 
-run = "dummy_run"
+run = "test_run"
 device_type = "cuda"
 
 # Model hyperparameters
-depth = 4
+depth = 8
 max_seq_len = 1024
 
 # Training params
@@ -28,25 +28,25 @@ target_flops = -1
 target_param_data_ratio = 20
 
 # Optimization
-device_batch_size = 4
-total_batch_size = 64 * 4096 # in tokens
-unembedding_lr = 0.004   
-embedding_lr = 0.2   
-matrix_lr = 0.02   
+device_batch_size = 8
+total_batch_size = 2**19 # in tokens
+unembedding_lr = 0.0005
+embedding_lr = 0.0008   
+matrix_lr = 0.002
 grad_clip = 1.0 
-weight_decay = 0.0
-warmup_ratio =0.0
+weight_decay = 0.01
+warmup_ratio = 0.15
 warmdown_ratio = 0.2
 final_lr_frac = 0.0
 resume_from_step = -1
 
 # Evaluation
-eval_every = 250
-eval_tokens = 64 * 4096 * 16  # in tokens
-core_metric_every = 2000
-core_metric_max_per_task = 100
-sample_every = 10
-save_every = -1
+eval_every = 50
+eval_tokens = 20*2**19  # in tokens
+core_metric_every = 500
+core_metric_max_per_task = 500
+sample_every = 250
+save_every = 250
 
 # Output
 model_tag = ""
@@ -155,9 +155,7 @@ optimizer = model.setup_optimizer(
     weight_decay=weight_decay,
 )
 if resuming and optimizer_state_dict is not None:
-    for optim_name, optimizer in optimizer.items():
-        if optim_name in optimizer_state_dict:
-            optimizer.load_state_dict(optimizer_state_dict[optim_name])
+    optimizer.load_state_dict(optimizer_state_dict)
     del optimizer_state_dict
 
 # Initialize input batch
@@ -181,12 +179,13 @@ val_loader = data_loader(
     device=device,
 )
 
-eval_every = 4
 x, y, data_loader_state_dict = next(train_loader)
 
 def get_lr_multiplier(step):
     warmup_iters = round(warmup_ratio * num_iterations)
     warmdown_iters = round(warmdown_ratio * num_iterations)
+    if step == 0:  # Debug output
+        print_log(f"Warmup iterations: {warmup_iters}, Total iterations: {num_iterations}")
     if step < warmup_iters:
         return (step + 1) / warmup_iters
     elif step <= num_iterations - warmdown_iters:
@@ -231,7 +230,7 @@ def inference(model, tokenizer):
     ]
     engine = Engine(model, tokenizer)
     for prompt in prompts:
-        prompt_tokens = tokenizer.encode(prompt, prepend=tokenizer.get_bos_token_id())
+        prompt_tokens = tokenizer.encode(prompt, prepend="<|bos|>")
         with autocast_ctx:
             sample = engine.generate_batch(
                 tokens=prompt_tokens,
@@ -248,7 +247,7 @@ while True:
     last_step = (step == num_iterations)
     flops_performed = step * total_batch_size * num_flops_per_token
 
-    if step % eval_every == 0 or last_step:
+    if step >0 and  (step % eval_every == 0 or last_step):
         model.eval()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len* world_size)
         with autocast_ctx:
@@ -265,7 +264,7 @@ while True:
         model.train()
 
     results = {}
-    if core_metric_every > 0 and (step % core_metric_every == 0 or last_step):
+    if step >0 and (core_metric_every > 0 and (step % core_metric_every == 0 or last_step)):
         model.eval()
         with autocast_ctx:
             results = evaluate_model(
@@ -283,7 +282,7 @@ while True:
         })
         model.train()
     
-    if master_rank and (last_step or (sample_every > 0 and step % sample_every == 0)):
+    if master_rank and (last_step or (sample_every > 0 and  step >0 and step % sample_every == 0)):
         # Inference samples
         inference(orig_model, tokenizer)
 
@@ -321,7 +320,8 @@ while True:
         train_loss = loss.detach()
         loss = loss / grad_accum_steps
         loss.backward()
-        x, y, data_loader_state_dict  = next(train_loader)
+        if micro_step < grad_accum_steps - 1:  # Don't load extra batch on last step
+            x, y, data_loader_state_dict  = next(train_loader)
 
     # Add gradient clipping to prevent exploding gradients
     grad_clip_enabled = grad_clip > 0
@@ -334,6 +334,9 @@ while True:
         param_group['lr'] = param_group['initial_lr'] * lrm
     optimizer.step()
     model.zero_grad(set_to_none=True)
+    
+    # Load next batch for next iteration
+    x, y, data_loader_state_dict = next(train_loader)
 
     t1 = time.time()
     dt = t1 - t0
