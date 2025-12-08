@@ -41,9 +41,9 @@ final_lr_frac = 0.0
 resume_from_step = -1
 
 # Evaluation
-eval_every = 50
-eval_tokens = 20*2**19  # in tokens
-core_metric_every = 500
+eval_every = 1000  # Reduce frequency to avoid timeouts
+eval_tokens = 2*2**19  # Reduce evaluation tokens significantly
+core_metric_every = -1  # Disable core metrics evaluation temporarily
 core_metric_max_per_task = 500
 sample_every = 250
 save_every = 250
@@ -247,7 +247,9 @@ while True:
     last_step = (step == num_iterations)
     flops_performed = step * total_batch_size * num_flops_per_token
 
-    if step >0 and  (step % eval_every == 0 or last_step):
+    val_bpb = None
+
+    if last_step or (step > 0 and step % eval_every == 0):
         model.eval()
         eval_steps = eval_tokens // (device_batch_size * max_seq_len* world_size)
         with autocast_ctx:

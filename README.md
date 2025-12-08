@@ -28,6 +28,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
 source .venv/bin/activate  # On macOS/Linux
 
+# Install Rust dependencies
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
 # Install the package and dependencies (this will automatically build the Rust extension)
 uv pip install -e .
 

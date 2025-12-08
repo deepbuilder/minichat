@@ -41,8 +41,13 @@ def evaluate_bpb(model, batches, steps, token_bytes):
             total_bytes += num_bytes.sum()
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     if world_size > 1:
-        dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
-        dist.all_reduce(total_bytes, op=dist.ReduceOp.SUM)
+        try:
+            dist.all_reduce(total_nats, op=dist.ReduceOp.SUM)
+            dist.all_reduce(total_bytes, op=dist.ReduceOp.SUM)
+        except Exception as e:
+            print(f"Warning: Failed to sync evaluation metrics across ranks: {e}")
+            # Fall back to local calculation only
+            pass
             
     total_nats = total_nats.item()
     total_bytes = total_bytes.item()

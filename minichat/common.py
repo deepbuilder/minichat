@@ -15,6 +15,8 @@ class ColoredFormatter(logging.Formatter):
     red = "\x1b[31;21m"
     bold_red = "\x1b[31;1m"
     reset = "\x1b[0m"
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
     COLORS = {
         'DEBUG': grey,
         'INFO': grey,

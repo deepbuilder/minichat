@@ -129,8 +129,11 @@ def evaluate_example(idx, data, task_meta, model, tokenizer, device):
     if num_fewshot > 0:
         rng = random.Random(42 + idx)  # Seed with a combination of a constant and the example index
         available_indices = [i for i in range(len(data)) if i != idx]
-        fewshot_indices = rng.sample(available_indices, num_fewshot)
-        fewshot_examples = [data[i] for i in fewshot_indices]
+        # Ensure we don't try to sample more examples than available
+        num_fewshot = min(num_fewshot, len(available_indices))
+        if num_fewshot > 0:
+            fewshot_indices = rng.sample(available_indices, num_fewshot)
+            fewshot_examples = [data[i] for i in fewshot_indices]
     
     if task_type == 'multiple_choice':
         prompts = render_prompt_mc(item, continuation_delimiter, fewshot_examples)
