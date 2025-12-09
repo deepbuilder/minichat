@@ -46,7 +46,7 @@ python -m ipykernel install --user --name=minichat --display-name="minichat"
 source .venv/bin/activate
 
 # Download the dataset
-python -m minichat.dataset -w 100
+python -m minichat.dataset -w 240
 
 # Train the tokenizer
 python -m scripts.tok_train --max_chars=4000000000

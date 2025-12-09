@@ -14,8 +14,11 @@ def data_loader_w_state(B, T, split, tokenizer_batch_size=16, tokenizer_threds=4
     assert split in ['train', 'val'], f"Invalid split: {split}"
     ddp, rank, local_rank, world_size = get_ddp_info()
     def document_batches():
+        import random
         parquet_files = list_files()
         parquet_files = parquet_files[:-1] if split == 'train' else parquet_files[-1:]
+        random.shuffle(parquet_files)
+        
         resume_pq_index =  resume_state_dict['pq_idx'] if resume_state_dict is not None else 0
         resume_rg_index =  resume_state_dict['rg_idx'] if resume_state_dict is not None else None
         pq_idx = resume_pq_index
@@ -38,6 +41,10 @@ def data_loader_w_state(B, T, split, tokenizer_batch_size=16, tokenizer_threds=4
                         yield batch_docs, (pq_idx, rg_idx)
                     rg_idx += world_size
                 pq_idx +=1
+            # Reset to cycle through data again (epoch completed)
+            # Reshuffle for next epoch
+            random.shuffle(parquet_files)
+            pq_idx = 0
     
     batches = document_batches()
 

@@ -138,7 +138,8 @@ class Engine:
                 break
 
             if first_iteration:
-                sampled_tokens = [tokens[-1]] * batch_size
+                # Use the next_ids that were already sampled from the prefill forward pass
+                sampled_tokens = [next_ids[0, 0].item()] * batch_size
                 first_iteration = False
             else:
                 logits = self.model.forward(ids, kv_cache=kv_cache_decode)
