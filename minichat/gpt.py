@@ -1,4 +1,5 @@
 import torch
+import math
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
@@ -122,18 +123,21 @@ class GPT(nn.Module):
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            fan_out = module.weight.size(0)
+            fan_in = module.weight.size(1)
+            std = 1.0 / math.sqrt(fan_in) * min(1.0, math.sqrt(fan_out/fan_in))
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
             if module.bias is not None:
-                nn.init.zeros_(module.bias)
+                torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            nn.init.normal_(module.weight, mean=0.0, std=1.0)
     
     def init_weights(self):
         self.apply(self._init_weights)
         torch.nn.init.zeros_(self.lm_head.weight)
-        for block in self.transformer.h:
-            torch.nn.init.zeros_(block.attn.c_proj.weight)
-            torch.nn.init.zeros_(block.mlp.c_proj.weight)
+        # for block in self.transformer.h:
+        #     torch.nn.init.zeros_(block.attn.c_proj.weight)
+        #     torch.nn.init.zeros_(block.mlp.c_proj.weight)
         head_dim = self.config.emb_dim // self.config.n_heads
         cos, sin = self._precompute_rotary_embeddings(self.rotary_seq_len, head_dim, device='cuda')
         self.cos.copy_(cos)
